@@ -2,13 +2,13 @@
    VARIABLES & RESET
    ============================================= */
 :root {
-    /* Colors - Professional textile business theme */
-    --primary-color: #8B4513;        /* Saddle Brown - textile/fabric feel */
-    --primary-dark: #654321;         /* Dark brown */
-    --secondary-color: #D4AF37;      /* Gold - premium feel */
+    /* Colors - Orange with black tint theme */
+    --primary-color: #E85D04;        /* Burnt Orange */
+    --primary-dark: #9D4200;         /* Dark Orange with black tint */
+    --secondary-color: #FFA500;      /* Bright Orange accent */
     --accent-color: #25D366;         /* WhatsApp green */
-    --text-dark: #2c2c2c;
-    --text-light: #555555;
+    --text-dark: #1a1a1a;
+    --text-light: #4a4a4a;
     --background-light: #f9f9f9;
     --background-white: #ffffff;
     --border-color: #e0e0e0;

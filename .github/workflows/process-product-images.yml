@@ -120,11 +120,11 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const fs = require('fs');
-            const imageCount = '${{ steps.extract-images.outputs.image_count }}';
+            const imageCount = parseInt('${{ steps.extract-images.outputs.image_count }}') || 0;
+            const issueTitle = context.payload.issue.title;
 
             let comment;
-            if (imageCount === '0') {
+            if (imageCount === 0) {
               comment = `## No images found
 
             I couldn't find any images in this issue. Please make sure to:
@@ -133,15 +133,14 @@ jobs:
 
             Then remove and re-add the \`new-products\` label to try again.`;
             } else {
-              // List the processed images
-              let imageList = '';
-              try {
-                const files = fs.readdirSync('products').filter(f =>
-                  f.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-                );
-                imageList = files.slice(-parseInt(imageCount)).map(f => `- ${f}`).join('\n');
-              } catch (e) {
-                imageList = `${imageCount} images`;
+              // Generate filenames the same way as the download step
+              let imageList;
+              if (imageCount === 1) {
+                imageList = `- ${issueTitle}.jpg`;
+              } else {
+                imageList = Array.from({length: imageCount}, (_, i) =>
+                  `- ${issueTitle} ${i + 1}.jpg`
+                ).join('\n');
               }
 
               comment = `## Successfully processed ${imageCount} image(s)
@@ -161,7 +160,7 @@ jobs:
             });
 
             // Close the issue if successful
-            if (imageCount !== '0') {
+            if (imageCount > 0) {
               await github.rest.issues.update({
                 owner: context.repo.owner,
                 repo: context.repo.repo,

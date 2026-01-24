@@ -39,40 +39,42 @@ jobs:
             fs.mkdirSync(tempDir, { recursive: true });
 
             const issueBody = context.payload.issue.body || '';
+            const issueTitle = context.payload.issue.title || 'Product';
 
-            // Match GitHub-hosted image URLs in issue body
-            // Patterns: ![alt](url) or plain URLs to user-images/assets
-            const imagePatterns = [
-              /!\[.*?\]\((https:\/\/(?:user-images\.githubusercontent\.com|github\.com\/user-attachments\/assets)\/[^\s\)]+)\)/g,
-              /(https:\/\/(?:user-images\.githubusercontent\.com|github\.com\/user-attachments\/assets)\/[^\s\)]+)/g
-            ];
+            // Sanitize issue title for use as filename
+            const baseFilename = issueTitle
+              .replace(/[<>:"/\\|?*]/g, '') // Remove invalid filename chars
+              .replace(/\s+/g, ' ')          // Normalize whitespace
+              .trim();
 
-            const imageUrls = new Set();
-            for (const pattern of imagePatterns) {
-              const matches = issueBody.matchAll(pattern);
-              for (const match of matches) {
-                imageUrls.add(match[1]);
-              }
+            // Match GitHub-hosted image URLs
+            // Pattern: ![...](url)
+            const imagePattern = /!\[[^\]]*\]\((https:\/\/(?:user-images\.githubusercontent\.com|github\.com\/user-attachments\/assets)\/[^\s\)]+)\)/g;
+
+            const imageUrls = [];
+            for (const match of issueBody.matchAll(imagePattern)) {
+              imageUrls.push(match[1]);
             }
 
-            if (imageUrls.size === 0) {
+            if (imageUrls.length === 0) {
               core.setOutput('image_count', '0');
               core.setFailed('No images found in the issue body');
               return;
             }
 
-            console.log(`Found ${imageUrls.size} images to process`);
+            console.log(`Found ${imageUrls.length} images to process`);
+            console.log(`Using issue title as filename: "${baseFilename}"`);
 
             let downloaded = 0;
-            for (const url of imageUrls) {
+            for (let i = 0; i < imageUrls.length; i++) {
+              const url = imageUrls[i];
               try {
-                // Extract filename from URL or generate one
-                const urlPath = new URL(url).pathname;
-                let filename = path.basename(urlPath);
-
-                // If filename has no proper extension, try to determine from URL
-                if (!filename.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
-                  filename = `image_${downloaded + 1}.jpg`;
+                // Use issue title as filename, add number if multiple images
+                let filename;
+                if (imageUrls.length === 1) {
+                  filename = `${baseFilename}.jpg`;
+                } else {
+                  filename = `${baseFilename} ${i + 1}.jpg`;
                 }
 
                 console.log(`Downloading: ${filename}`);

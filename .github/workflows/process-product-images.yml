@@ -1,0 +1,169 @@
+name: Process Product Images
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  process-images:
+    # Only run when the "new-products" label is added
+    if: github.event.label.name == 'new-products'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install Pillow
+
+      - name: Extract and download images from issue
+        uses: actions/github-script@v7
+        id: extract-images
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Create temp directory for downloads
+            const tempDir = 'temp_uploads';
+            fs.mkdirSync(tempDir, { recursive: true });
+
+            const issueBody = context.payload.issue.body || '';
+
+            // Match GitHub-hosted image URLs in issue body
+            // Patterns: ![alt](url) or plain URLs to user-images/assets
+            const imagePatterns = [
+              /!\[.*?\]\((https:\/\/(?:user-images\.githubusercontent\.com|github\.com\/user-attachments\/assets)\/[^\s\)]+)\)/g,
+              /(https:\/\/(?:user-images\.githubusercontent\.com|github\.com\/user-attachments\/assets)\/[^\s\)]+)/g
+            ];
+
+            const imageUrls = new Set();
+            for (const pattern of imagePatterns) {
+              const matches = issueBody.matchAll(pattern);
+              for (const match of matches) {
+                imageUrls.add(match[1]);
+              }
+            }
+
+            if (imageUrls.size === 0) {
+              core.setOutput('image_count', '0');
+              core.setFailed('No images found in the issue body');
+              return;
+            }
+
+            console.log(`Found ${imageUrls.size} images to process`);
+
+            let downloaded = 0;
+            for (const url of imageUrls) {
+              try {
+                // Extract filename from URL or generate one
+                const urlPath = new URL(url).pathname;
+                let filename = path.basename(urlPath);
+
+                // If filename has no proper extension, try to determine from URL
+                if (!filename.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+                  filename = `image_${downloaded + 1}.jpg`;
+                }
+
+                console.log(`Downloading: ${filename}`);
+
+                const response = await fetch(url);
+                if (!response.ok) {
+                  console.log(`Failed to download ${url}: ${response.status}`);
+                  continue;
+                }
+
+                const buffer = await response.arrayBuffer();
+                fs.writeFileSync(path.join(tempDir, filename), Buffer.from(buffer));
+                downloaded++;
+              } catch (error) {
+                console.log(`Error downloading ${url}: ${error.message}`);
+              }
+            }
+
+            core.setOutput('image_count', downloaded.toString());
+            console.log(`Successfully downloaded ${downloaded} images`);
+
+      - name: Process images
+        if: steps.extract-images.outputs.image_count != '0'
+        run: |
+          python scripts/compress_images.py --input temp_uploads --output products
+          python scripts/update_products.py
+
+      - name: Commit and push changes
+        if: steps.extract-images.outputs.image_count != '0'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add products/ products/products.json
+          git commit -m "Add ${{ steps.extract-images.outputs.image_count }} new product images
+
+          Processed from issue #${{ github.event.issue.number }}
+
+          Co-Authored-By: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          git push
+
+      - name: Comment on issue with results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const imageCount = '${{ steps.extract-images.outputs.image_count }}';
+
+            let comment;
+            if (imageCount === '0') {
+              comment = `## No images found
+
+            I couldn't find any images in this issue. Please make sure to:
+            1. Drag and drop images directly into the issue body
+            2. Wait for them to upload before submitting
+
+            Then remove and re-add the \`new-products\` label to try again.`;
+            } else {
+              // List the processed images
+              let imageList = '';
+              try {
+                const files = fs.readdirSync('products').filter(f =>
+                  f.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+                );
+                imageList = files.slice(-parseInt(imageCount)).map(f => `- ${f}`).join('\n');
+              } catch (e) {
+                imageList = `${imageCount} images`;
+              }
+
+              comment = `## Successfully processed ${imageCount} image(s)
+
+            The following images have been compressed and added to the products folder:
+
+            ${imageList}
+
+            The website will update automatically once GitHub Pages rebuilds.`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
+
+            // Close the issue if successful
+            if (imageCount !== '0') {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                state: 'closed'
+              });
+            }
